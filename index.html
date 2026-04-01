@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>the blue screen of death</title>
+  <style>
+    body {
+      margin: 0;
+      background: #87bfff;
+      font-family: "Courier New", monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      color: #1f2a44;
+      touch-action: manipulation;
+    }
+
+    h1 {
+      margin: 18px 0 10px;
+      font-size: 28px;
+      text-align: center;
+    }
+
+    #hud {
+      width: 360px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 18px;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    #game {
+      position: relative;
+      width: 360px;
+      height: 540px;
+      background: linear-gradient(to bottom, #9fd3ff 0%, #bfe6ff 70%, #63c74d 70%, #63c74d 100%);
+      border: 6px solid #2f4f6f;
+      box-sizing: border-box;
+      overflow: hidden;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+
+    #bunny {
+      position: absolute;
+      width: 56px;
+      height: 56px;
+      left: 152px;
+      bottom: 18px;
+    }
+
+    .pixel {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+    }
+
+    .diamond {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+    }
+
+    .bomb {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 30, 60, 0.82);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: white;
+      padding: 20px;
+      box-sizing: border-box;
+      z-index: 10;
+    }
+
+    #overlay h2 {
+      margin: 0 0 12px;
+      font-size: 32px;
+    }
+
+    #overlay p {
+      margin: 6px 0;
+      font-size: 18px;
+    }
+
+    #restartBtn {
+      margin-top: 16px;
+      padding: 12px 18px;
+      border: none;
+      border-radius: 10px;
+      background: #ffd54f;
+      color: #1f2a44;
+      font-family: inherit;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #label {
+      margin-top: 12px;
+      font-size: 16px;
+      text-align: center;
+      max-width: 360px;
+      padding: 0 10px;
+    }
+
+    #controls {
+      display: flex;
+      gap: 16px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      width: 110px;
+      height: 52px;
+      border: none;
+      border-radius: 10px;
+      background: #2f4f6f;
+      color: white;
+      font-size: 22px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+      background: #1f3448;
+    }
+  </style>
+</head>
+<body>
+  <h1>the blue screen of death</h1>
+
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">3</span></div>
+    <div>Time: <span id="timer">60</span></div>
+  </div>
+
+  <div id="game">
+    <div id="overlay">
+      <h2>Game Over</h2>
+      <p id="finalMessage">Nice try!</p>
+      <p>Final Score: <span id="finalScore">0</span></p>
+      <button id="restartBtn">Play Again</button>
+    </div>
+    <div id="bunny"></div>
+  </div>
+
+  <div id="label">Catch diamonds before time runs out! 💎</div>
+
+  <div id="controls">
+    <button class="btn" id="leftBtn">←</button>
+    <button class="btn" id="rightBtn">→</button>
+  </div>
+
+  <script>
+    const game = document.getElementById("game");
+    const bunny = document.getElementById("bunny");
+    const leftBtn = document.getElementById("leftBtn");
+    const rightBtn = document.getElementById("rightBtn");
+    const scoreDisplay = document.getElementById("score");
+    const livesDisplay = document.getElementById("lives");
+    const timerDisplay = document.getElementById("timer");
+    const label = document.getElementById("label");
+    const overlay = document.getElementById("overlay");
+    const finalMessage = document.getElementById("finalMessage");
+    const finalScore = document.getElementById("finalScore");
+    const restartBtn = document.getElementById("restartBtn");
+
+    const gameWidth = 360;
+    const gameHeight = 540;
+    const bunnyWidth = 56;
+    const bunnyHeight = 56;
+    const diamondSize = 40;
+    const bombSize = 40;
+
+    let score = 0;
+    let lives = 3;
+    let timeLeft = 60;
+    let gameRunning = true;
+
+    let diamondSpawner;
+    let bombSpawner;
+    let countdown;
+
+    const bunnyPixels = [
+      [16, 0], [32, 0],
+      [8, 8], [16, 8], [24, 8], [32, 8], [40, 8],
+      [8, 16], [16, 16], [24, 16], [32, 16], [40, 16],
+      [0, 24], [8, 24], [16, 24], [24, 24], [32, 24], [40, 24], [48, 24],
+      [0, 32], [8, 32], [16, 32], [24, 32], [32, 32], [40, 32], [48, 32],
+      [8, 40], [16, 40], [24, 40], [32, 40], [40, 40],
+      [16, 48], [32, 48]
+    ];
+
+    const earInner = [[16, 8], [32, 8]];
+    const eyes = [[16, 24], [32, 24]];
+    const nose = [[24, 32]];
+
+    function makePixel(parent, x, y, color) {
+      const p = document.createElement("div");
+      p.className = "pixel";
+      p.style.left = x + "px";
+      p.style.top = y + "px";
+      p.style.background = color;
+      parent.appendChild(p);
+    }
+
+    function drawBunny() {
+      bunny.innerHTML = "";
+      bunnyPixels.forEach(([x, y]) => makePixel(bunny, x, y, "#8b5a2b"));
+      earInner.forEach(([x, y]) => makePixel(bunny, x, y, "#c68c53"));
+      eyes.forEach(([x, y]) => makePixel(bunny, x, y, "#111"));
+      nose.forEach(([x, y]) => makePixel(bunny, x, y, "#ff9aa2"));
+    }
+
+    let bunnyX = 152;
+    const moveAmount = 22;
+    const minX = 0;
+    const maxX = gameWidth - bunnyWidth;
+
+    function updateBunny() {
+      bunny.style.left = bunnyX + "px";
+    }
+
+    function moveLeft() {
+      if (!gameRunning) return;
+      bunnyX = Math.max(minX, bunnyX - moveAmount);
+      updateBunny();
+    }
+
+    function moveRight() {
+      if (!gameRunning) return;
+      bunnyX = Math.min(maxX, bunnyX + moveAmount);
+      updateBunny();
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") moveLeft();
+      if (e.key === "ArrowRight") moveRight();
+    });
+
+    function holdButton(button, moveFn) {
+      let timer = null;
+
+      const start = (e) => {
+        e.preventDefault();
+        moveFn();
+        timer = setInterval(moveFn, 90);
+      };
+
+      const stop = () => {
+        clearInterval(timer);
+        timer = null;
+      };
+
+      button.addEventListener("mousedown", start);
+      button.addEventListener("touchstart", start, { passive: false });
+      button.addEventListener("mouseup", stop);
+      button.addEventListener("mouseleave", stop);
+      button.addEventListener("touchend", stop);
+      button.addEventListener("touchcancel", stop);
+    }
+
+    holdButton(leftBtn, moveLeft);
+    holdButton(rightBtn, moveRight);
+
+    function addScore() {
+      score += 5;
+      scoreDisplay.textContent = score;
+    }
+
+    function loseLife() {
+      if (!gameRunning) return;
+      lives -= 1;
+      if (lives < 0) lives = 0;
+      livesDisplay.textContent = lives;
+      if (lives === 0) {
+        endGame("You ran out of lives!");
+      }
+    }
+
+    function clearFallingItems() {
+      document.querySelectorAll(".diamond, .bomb").forEach(item => item.remove());
+    }
+
+    function endGame(message) {
+      if (!gameRunning) return;
+      gameRunning = false;
+      label.textContent = message;
+      finalMessage.textContent = message;
+      finalScore.textContent = score;
+      overlay.style.display = "flex";
+      clearInterval(diamondSpawner);
+      clearInterval(bombSpawner);
+      clearInterval(countdown);
+      clearFallingItems();
+    }
+
+    function isTouching(itemX, itemY, itemSize) {
+      const bunnyY = gameHeight - 18 - bunnyHeight;
+      return (
+        itemX + itemSize > bunnyX &&
+        itemX < bunnyX + bunnyWidth &&
+        itemY + itemSize > bunnyY &&
+        itemY < bunnyY + bunnyHeight
+      );
+    }
+
+    function createDiamond() {
+      if (!gameRunning) return;
+
+      const diamond = document.createElement("div");
+      diamond.className = "diamond";
+      diamond.style.left = Math.floor(Math.random() * (gameWidth - diamondSize)) + "px";
+      diamond.style.top = "-40px";
+
+      const pixels = [
+        [8, 0], [16, 0], [24, 0],
+        [0, 8], [8, 8], [16, 8], [24, 8], [32, 8],
+        [8, 16], [16, 16], [24, 16],
+        [8, 24], [16, 24], [24, 24],
+        [16, 32]
+      ];
+
+      pixels.forEach(([x, y]) => makePixel(diamond, x, y, "#5de2ff"));
+      makePixel(diamond, 8, 8, "#d9f8ff");
+      makePixel(diamond, 16, 8, "#8ef0ff");
+
+      game.appendChild(diamond);
+
+      let y = -40;
+      const fall = setInterval(() => {
+        if (!gameRunning) {
+          clearInterval(fall);
+          diamond.remove();
+          return;
+        }
+
+        y += 7;
+        diamond.style.top = y + "px";
+
+        const x = parseInt(diamond.style.left);
+
+        if (isTouching(x, y, diamondSize)) {
+          clearInterval(fall);
+          diamond.remove();
+          addScore();
+          return;
+        }
+
+        if (y > gameHeight) {
+          clearInterval(fall);
+          diamond.remove();
+        }
+      }, 20);
+    }
+
+    function createBomb() {
+      if (!gameRunning) return;
+
+      const bomb = document.createElement("div");
+      bomb.className = "bomb";
+      bomb.style.left = Math.floor(Math.random() * (gameWidth - bombSize)) + "px";
+      bomb.style.top = "-40px";
+
+      const bombPixels = [
+        [8, 8], [16, 8], [24, 8],
+        [0, 16], [8, 16], [16, 16], [24, 16], [32, 16],
+        [0, 24], [8, 24], [16, 24], [24, 24], [32, 24],
+        [8, 32], [16, 32], [24, 32]
+      ];
+
+      const fusePixels = [
+        [24, 0], [16, 0], [32, 0]
+      ];
+
+      bombPixels.forEach(([x, y]) => makePixel(bomb, x, y, "#2f2f2f"));
+      fusePixels.forEach(([x, y]) => makePixel(bomb, x, y, "#ffb347"));
+      makePixel(bomb, 16, 16, "#555");
+      makePixel(bomb, 24, 16, "#777");
+
+      game.appendChild(bomb);
+
+      let y = -40;
+      const fall = setInterval(() => {
+        if (!gameRunning) {
+          clearInterval(fall);
+          bomb.remove();
+          return;
+        }
+
+        y += 8;
+        bomb.style.top = y + "px";
+
+        const x = parseInt(bomb.style.left);
+
+        if (isTouching(x, y, bombSize)) {
+          clearInterval(fall);
+          bomb.remove();
+          loseLife();
+          return;
+        }
+
+        if (y > gameHeight) {
+          clearInterval(fall);
+          bomb.remove();
+        }
+      }, 20);
+    }
+
+    function startGame() {
+      score = 0;
+      lives = 3;
+      timeLeft = 60;
+      gameRunning = true;
+      bunnyX = 152;
+
+      scoreDisplay.textContent = score;
+      livesDisplay.textContent = lives;
+      timerDisplay.textContent = timeLeft;
+      label.textContent = "Catch diamonds before time runs out! 💎";
+      overlay.style.display = "none";
+
+      clearFallingItems();
+      updateBunny();
+      drawBunny();
+
+      diamondSpawner = setInterval(createDiamond, 900);
+      bombSpawner = setInterval(createBomb, 1200);
+
+      countdown = setInterval(() => {
+        if (!gameRunning) return;
+
+        timeLeft -= 1;
+        timerDisplay.textContent = timeLeft;
+
+        if (timeLeft <= 0) {
+          timerDisplay.textContent = 0;
+          endGame("Time's up!");
+        }
+      }, 1000);
+    }
+
+    restartBtn.addEventListener("click", () => {
+      clearInterval(diamondSpawner);
+      clearInterval(bombSpawner);
+      clearInterval(countdown);
+      startGame();
+    });
+
+    drawBunny();
+    updateBunny();
+    startGame();
+  </script>
+</body>
+</html>
