@@ -31,6 +31,8 @@
       font-size: 18px;
       margin-bottom: 8px;
       font-weight: bold;
+      flex-wrap: wrap;
+      gap: 6px;
     }
 
     #game {
@@ -43,6 +45,22 @@
       overflow: hidden;
       image-rendering: pixelated;
       touch-action: none;
+      transition: background 0.5s ease, border-color 0.5s ease;
+    }
+
+    .level-blue {
+      background: linear-gradient(to bottom, #9fd3ff 0%, #bfe6ff 70%, #63c74d 70%, #63c74d 100%) !important;
+      border-color: #2f4f6f !important;
+    }
+
+    .level-red {
+      background: linear-gradient(to bottom, #5c0000 0%, #b30000 50%, #ff4d4d 70%, #5a0000 100%) !important;
+      border-color: #7a0000 !important;
+    }
+
+    .level-devil {
+      background: linear-gradient(to bottom, #1a0000 0%, #5b0000 30%, #b22222 60%, #ff6a00 100%) !important;
+      border-color: #ff3d00 !important;
     }
 
     #bunny {
@@ -51,6 +69,7 @@
       height: 56px;
       left: 152px;
       bottom: 18px;
+      z-index: 4;
     }
 
     .pixel {
@@ -59,16 +78,30 @@
       height: 8px;
     }
 
-    .diamond {
+    .diamond, .bomb, .powerup, .bossBomb {
       position: absolute;
       width: 40px;
       height: 40px;
     }
 
-    .bomb {
+    .laser {
       position: absolute;
-      width: 40px;
-      height: 40px;
+      width: 20px;
+      height: 30px;
+      background: #ff2a6d;
+      box-shadow: 0 0 14px #ff2a6d;
+      border-radius: 6px;
+      z-index: 5;
+    }
+
+    #boss {
+      position: absolute;
+      width: 96px;
+      height: 72px;
+      top: 4px;
+      left: 132px;
+      display: none;
+      z-index: 4;
     }
 
     #overlay {
@@ -115,16 +148,19 @@
       text-align: center;
       max-width: 360px;
       padding: 0 10px;
+      min-height: 22px;
     }
 
     #controls {
       display: flex;
-      gap: 16px;
+      gap: 12px;
       margin-top: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
     }
 
     .btn {
-      width: 110px;
+      width: 100px;
       height: 52px;
       border: none;
       border-radius: 10px;
@@ -139,6 +175,16 @@
       transform: scale(0.98);
       background: #1f3448;
     }
+
+    #laserStatus {
+      color: #c2185b;
+      font-weight: bold;
+    }
+
+    #levelDisplay {
+      color: #7a0000;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -147,16 +193,19 @@
   <div id="hud">
     <div>Score: <span id="score">0</span></div>
     <div>Lives: <span id="lives">3</span></div>
-    <div>Time: <span id="timer">60</span></div>
+    <div>Time: <span id="timer">30</span></div>
+    <div>Laser: <span id="laserStatus">OFF</span></div>
+    <div>Level: <span id="levelDisplay">1</span></div>
   </div>
 
-  <div id="game">
+  <div id="game" class="level-blue">
     <div id="overlay">
-      <h2>Game Over</h2>
+      <h2 id="overlayTitle">Game Over</h2>
       <p id="finalMessage">Nice try!</p>
       <p>Final Score: <span id="finalScore">0</span></p>
       <button id="restartBtn">Play Again</button>
     </div>
+    <div id="boss"></div>
     <div id="bunny"></div>
   </div>
 
@@ -164,19 +213,25 @@
 
   <div id="controls">
     <button class="btn" id="leftBtn">←</button>
+    <button class="btn" id="shootBtn">⚡</button>
     <button class="btn" id="rightBtn">→</button>
   </div>
 
   <script>
     const game = document.getElementById("game");
     const bunny = document.getElementById("bunny");
+    const boss = document.getElementById("boss");
     const leftBtn = document.getElementById("leftBtn");
     const rightBtn = document.getElementById("rightBtn");
+    const shootBtn = document.getElementById("shootBtn");
     const scoreDisplay = document.getElementById("score");
     const livesDisplay = document.getElementById("lives");
     const timerDisplay = document.getElementById("timer");
+    const laserStatus = document.getElementById("laserStatus");
+    const levelDisplay = document.getElementById("levelDisplay");
     const label = document.getElementById("label");
     const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlayTitle");
     const finalMessage = document.getElementById("finalMessage");
     const finalScore = document.getElementById("finalScore");
     const restartBtn = document.getElementById("restartBtn");
@@ -187,14 +242,28 @@
     const bunnyHeight = 56;
     const diamondSize = 40;
     const bombSize = 40;
+    const powerupSize = 40;
+    const bossWidth = 96;
+    const bossHeight = 72;
 
     let score = 0;
     let lives = 3;
-    let timeLeft = 60;
+    let timeLeft = 30;
     let gameRunning = true;
+    let laserMode = false;
+    let laserTimeout = null;
+    let currentLevel = 1;
+    let changingLevel = false;
+    let bossFight = false;
+    let bossDirection = 1;
+    let bossX = 132;
+    let bossMoveInterval = null;
+    let bossBombSpawner = null;
+    let autoLaserInterval = null;
 
     let diamondSpawner;
     let bombSpawner;
+    let powerupSpawner;
     let countdown;
 
     const bunnyPixels = [
@@ -222,10 +291,46 @@
 
     function drawBunny() {
       bunny.innerHTML = "";
-      bunnyPixels.forEach(([x, y]) => makePixel(bunny, x, y, "#8b5a2b"));
-      earInner.forEach(([x, y]) => makePixel(bunny, x, y, "#c68c53"));
-      eyes.forEach(([x, y]) => makePixel(bunny, x, y, "#111"));
+      const bodyColor = currentLevel === 3 ? "#5a2a2a" : "#8b5a2b";
+      const earColor = currentLevel === 3 ? "#a94442" : "#c68c53";
+      bunnyPixels.forEach(([x, y]) => makePixel(bunny, x, y, bodyColor));
+      earInner.forEach(([x, y]) => makePixel(bunny, x, y, earColor));
+      eyes.forEach(([x, y]) => {
+        makePixel(bunny, x, y, laserMode ? "#ff2a6d" : "#111");
+      });
       nose.forEach(([x, y]) => makePixel(bunny, x, y, "#ff9aa2"));
+
+      if (currentLevel === 3) {
+        makePixel(bunny, 8, 0, "#ff3d00");
+        makePixel(bunny, 40, 0, "#ff3d00");
+      }
+    }
+
+    function drawBoss() {
+      boss.innerHTML = "";
+
+      const raccoonPixels = [
+        [24, 0],[32, 0],[40, 0],[48, 0],[56, 0],
+        [16, 8],[24, 8],[32, 8],[40, 8],[48, 8],[56, 8],[64, 8],
+        [8, 16],[16, 16],[24, 16],[32, 16],[40, 16],[48, 16],[56, 16],[64, 16],[72, 16],
+        [8, 24],[16, 24],[24, 24],[32, 24],[40, 24],[48, 24],[56, 24],[64, 24],[72, 24],
+        [16, 32],[24, 32],[32, 32],[40, 32],[48, 32],[56, 32],[64, 32],
+        [24, 40],[32, 40],[40, 40],[48, 40],[56, 40]
+      ];
+
+      raccoonPixels.forEach(([x, y]) => makePixel(boss, x, y, "#555"));
+      makePixel(boss, 16, 8, "#333");
+      makePixel(boss, 64, 8, "#333");
+      makePixel(boss, 24, 16, "#222");
+      makePixel(boss, 32, 16, "#222");
+      makePixel(boss, 40, 16, "#222");
+      makePixel(boss, 48, 16, "#222");
+      makePixel(boss, 56, 16, "#222");
+      makePixel(boss, 24, 24, "#fff");
+      makePixel(boss, 56, 24, "#fff");
+      makePixel(boss, 32, 24, "#111");
+      makePixel(boss, 48, 24, "#111");
+      makePixel(boss, 40, 32, "#ff3d00");
     }
 
     let bunnyX = 152;
@@ -238,20 +343,42 @@
     }
 
     function moveLeft() {
-      if (!gameRunning) return;
+      if (!gameRunning || changingLevel) return;
       bunnyX = Math.max(minX, bunnyX - moveAmount);
       updateBunny();
     }
 
     function moveRight() {
-      if (!gameRunning) return;
+      if (!gameRunning || changingLevel) return;
       bunnyX = Math.min(maxX, bunnyX + moveAmount);
       updateBunny();
+    }
+
+    function updateLaserStatus() {
+      laserStatus.textContent = laserMode ? "ON" : "OFF";
+      drawBunny();
+    }
+
+    function updateLevelLook() {
+      levelDisplay.textContent = currentLevel;
+      game.classList.remove("level-blue", "level-red", "level-devil");
+      if (currentLevel === 1) {
+        game.classList.add("level-blue");
+      } else if (currentLevel === 2) {
+        game.classList.add("level-red");
+      } else {
+        game.classList.add("level-devil");
+      }
+      drawBunny();
     }
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "ArrowLeft") moveLeft();
       if (e.key === "ArrowRight") moveRight();
+      if (e.key === " " || e.key === "Spacebar" || e.key.toLowerCase() === "x") {
+        e.preventDefault();
+        shootLaser();
+      }
     });
 
     function holdButton(button, moveFn) {
@@ -284,30 +411,43 @@
       scoreDisplay.textContent = score;
     }
 
-    function loseLife() {
-      if (!gameRunning) return;
-      lives -= 1;
+    function loseLife(amount = 1) {
+      if (!gameRunning || changingLevel) return;
+      lives -= amount;
       if (lives < 0) lives = 0;
       livesDisplay.textContent = lives;
       if (lives === 0) {
-        endGame("You ran out of lives!");
+        endGame("Levil Devil was too strong this time!", "Game Over");
       }
     }
 
     function clearFallingItems() {
-      document.querySelectorAll(".diamond, .bomb").forEach(item => item.remove());
+      document.querySelectorAll(".diamond, .bomb, .powerup, .laser, .bossBomb").forEach(item => item.remove());
     }
 
-    function endGame(message) {
+    function stopSpawners() {
+      clearInterval(diamondSpawner);
+      clearInterval(bombSpawner);
+      clearInterval(powerupSpawner);
+      clearInterval(countdown);
+      clearTimeout(laserTimeout);
+      clearInterval(bossMoveInterval);
+      clearInterval(bossBombSpawner);
+      clearInterval(autoLaserInterval);
+    }
+
+    function endGame(message, title = "Game Over") {
       if (!gameRunning) return;
       gameRunning = false;
+      changingLevel = false;
+      bossFight = false;
+      boss.style.display = "none";
       label.textContent = message;
+      overlayTitle.textContent = title;
       finalMessage.textContent = message;
       finalScore.textContent = score;
       overlay.style.display = "flex";
-      clearInterval(diamondSpawner);
-      clearInterval(bombSpawner);
-      clearInterval(countdown);
+      stopSpawners();
       clearFallingItems();
     }
 
@@ -321,13 +461,38 @@
       );
     }
 
+    function rectsTouch(ax, ay, aw, ah, bx, by, bw, bh) {
+      return (
+        ax < bx + bw &&
+        ax + aw > bx &&
+        ay < by + bh &&
+        ay + ah > by
+      );
+    }
+
     function createDiamond() {
-      if (!gameRunning) return;
+      if (!gameRunning || changingLevel || bossFight) return;
 
       const diamond = document.createElement("div");
       diamond.className = "diamond";
       diamond.style.left = Math.floor(Math.random() * (gameWidth - diamondSize)) + "px";
       diamond.style.top = "-40px";
+
+      let diamondColor = "#5de2ff";
+      let shineColor = "#d9f8ff";
+      let midColor = "#8ef0ff";
+
+      if (currentLevel === 2) {
+        diamondColor = "#ffb3b3";
+        shineColor = "#fff0f0";
+        midColor = "#ff8080";
+      }
+
+      if (currentLevel === 3) {
+        diamondColor = "#ff9e00";
+        shineColor = "#ffe0b2";
+        midColor = "#ff6a00";
+      }
 
       const pixels = [
         [8, 0], [16, 0], [24, 0],
@@ -337,21 +502,23 @@
         [16, 32]
       ];
 
-      pixels.forEach(([x, y]) => makePixel(diamond, x, y, "#5de2ff"));
-      makePixel(diamond, 8, 8, "#d9f8ff");
-      makePixel(diamond, 16, 8, "#8ef0ff");
+      pixels.forEach(([x, y]) => makePixel(diamond, x, y, diamondColor));
+      makePixel(diamond, 8, 8, shineColor);
+      makePixel(diamond, 16, 8, midColor);
 
       game.appendChild(diamond);
 
       let y = -40;
+      const speed = currentLevel === 1 ? 7 : currentLevel === 2 ? 9 : 11;
+
       const fall = setInterval(() => {
-        if (!gameRunning) {
+        if (!gameRunning || changingLevel || bossFight) {
           clearInterval(fall);
           diamond.remove();
           return;
         }
 
-        y += 7;
+        y += speed;
         diamond.style.top = y + "px";
 
         const x = parseInt(diamond.style.left);
@@ -371,7 +538,7 @@
     }
 
     function createBomb() {
-      if (!gameRunning) return;
+      if (!gameRunning || changingLevel || bossFight) return;
 
       const bomb = document.createElement("div");
       bomb.className = "bomb";
@@ -389,22 +556,40 @@
         [24, 0], [16, 0], [32, 0]
       ];
 
-      bombPixels.forEach(([x, y]) => makePixel(bomb, x, y, "#2f2f2f"));
+      let bombColor = "#2f2f2f";
+      let detail1 = "#555";
+      let detail2 = "#777";
+
+      if (currentLevel === 2) {
+        bombColor = "#5a0000";
+        detail1 = "#a00000";
+        detail2 = "#ff4d4d";
+      }
+
+      if (currentLevel === 3) {
+        bombColor = "#2b0000";
+        detail1 = "#ff3d00";
+        detail2 = "#ff9100";
+      }
+
+      bombPixels.forEach(([x, y]) => makePixel(bomb, x, y, bombColor));
       fusePixels.forEach(([x, y]) => makePixel(bomb, x, y, "#ffb347"));
-      makePixel(bomb, 16, 16, "#555");
-      makePixel(bomb, 24, 16, "#777");
+      makePixel(bomb, 16, 16, detail1);
+      makePixel(bomb, 24, 16, detail2);
 
       game.appendChild(bomb);
 
       let y = -40;
+      const speed = currentLevel === 1 ? 8 : currentLevel === 2 ? 11 : 13;
+
       const fall = setInterval(() => {
-        if (!gameRunning) {
+        if (!gameRunning || changingLevel || bossFight) {
           clearInterval(fall);
           bomb.remove();
           return;
         }
 
-        y += 8;
+        y += speed;
         bomb.style.top = y + "px";
 
         const x = parseInt(bomb.style.left);
@@ -423,43 +608,343 @@
       }, 20);
     }
 
-    function startGame() {
-      score = 0;
-      lives = 3;
-      timeLeft = 60;
-      gameRunning = true;
-      bunnyX = 152;
+    function createLaserPowerup() {
+      if (!gameRunning || changingLevel || bossFight) return;
 
-      scoreDisplay.textContent = score;
-      livesDisplay.textContent = lives;
-      timerDisplay.textContent = timeLeft;
-      label.textContent = "Catch diamonds before time runs out! 💎";
-      overlay.style.display = "none";
+      const powerup = document.createElement("div");
+      powerup.className = "powerup";
+      powerup.style.left = Math.floor(Math.random() * (gameWidth - powerupSize)) + "px";
+      powerup.style.top = "-40px";
 
+      const starPixels = [
+        [16, 0],
+        [8, 8], [16, 8], [24, 8],
+        [0, 16], [8, 16], [16, 16], [24, 16], [32, 16],
+        [8, 24], [16, 24], [24, 24],
+        [16, 32]
+      ];
+
+      const powerColor = currentLevel === 1 ? "#ff2a6d" : currentLevel === 2 ? "#ffd54f" : "#ff9100";
+      starPixels.forEach(([x, y]) => makePixel(powerup, x, y, powerColor));
+      makePixel(powerup, 16, 16, "#fff176");
+
+      game.appendChild(powerup);
+
+      let y = -40;
+      const speed = currentLevel === 1 ? 6 : currentLevel === 2 ? 7 : 8;
+
+      const fall = setInterval(() => {
+        if (!gameRunning || changingLevel || bossFight) {
+          clearInterval(fall);
+          powerup.remove();
+          return;
+        }
+
+        y += speed;
+        powerup.style.top = y + "px";
+
+        const x = parseInt(powerup.style.left);
+
+        if (isTouching(x, y, powerupSize)) {
+          clearInterval(fall);
+          powerup.remove();
+          activateLaserMode();
+          return;
+        }
+
+        if (y > gameHeight) {
+          clearInterval(fall);
+          powerup.remove();
+        }
+      }, 20);
+    }
+
+    function activateLaserMode() {
+      if (bossFight) return;
+      laserMode = true;
+      updateLaserStatus();
+      label.textContent = "Laser Eyes activated! Press X or ⚡";
+
+      clearTimeout(laserTimeout);
+      laserTimeout = setTimeout(() => {
+        laserMode = false;
+        updateLaserStatus();
+        if (gameRunning && !changingLevel) {
+          if (currentLevel === 1) {
+            label.textContent = "Catch diamonds before time runs out! 💎";
+          } else if (currentLevel === 2) {
+            label.textContent = "The Red Ring of Death is active! Survive! 🔴";
+          } else {
+            label.textContent = "Levil Devil has arrived! Stay alive! 😈";
+          }
+        }
+      }, 7000);
+    }
+
+    function shootLaser(auto = false) {
+      if (!gameRunning || !laserMode || changingLevel) return;
+
+      const laser = document.createElement("div");
+      laser.className = "laser";
+
+      const laserWidth = bossFight ? 44 : 20;
+      laser.style.width = laserWidth + "px";
+
+      const startX = bunnyX + bunnyWidth / 2 - laserWidth / 2;
+      let y = gameHeight - 18 - bunnyHeight - 12;
+
+      laser.style.left = startX + "px";
+      laser.style.top = y + "px";
+      game.appendChild(laser);
+
+      const laserMove = setInterval(() => {
+        if (!gameRunning || changingLevel) {
+          clearInterval(laserMove);
+          laser.remove();
+          return;
+        }
+
+        y -= bossFight ? 20 : (currentLevel === 3 ? 18 : 14);
+        laser.style.top = y + "px";
+
+        const targets = [...document.querySelectorAll(".bomb, .bossBomb")];
+        for (const target of targets) {
+          const targetX = parseInt(target.style.left);
+          const targetY = parseInt(target.style.top);
+          const targetSize = 40;
+
+          if (rectsTouch(startX, y, laserWidth, 30, targetX, targetY, targetSize, targetSize)) {
+            target.remove();
+            if (!bossFight || target.classList.contains("bomb")) {
+              laser.remove();
+              clearInterval(laserMove);
+              return;
+            }
+          }
+        }
+
+        if (bossFight) {
+          const bossLeft = bossX;
+          const bossTop = 4;
+          if (rectsTouch(startX, y, laserWidth, 30, bossLeft, bossTop, bossWidth, bossHeight)) {
+            addScore();
+          }
+        }
+
+        if (y < -30) {
+          clearInterval(laserMove);
+          laser.remove();
+        }
+      }, 20);
+    }
+
+    function startBossFight() {
+      if (bossFight || !gameRunning) return;
+
+      bossFight = true;
+      clearInterval(bombSpawner);
+      clearInterval(diamondSpawner);
+      clearInterval(powerupSpawner);
+      clearTimeout(laserTimeout);
+
+      document.querySelectorAll(".bomb").forEach(b => b.remove());
+      document.querySelectorAll(".diamond, .powerup").forEach(i => i.remove());
+
+      boss.style.display = "block";
+      drawBoss();
+      bossX = 132;
+      bossDirection = 1;
+      boss.style.left = bossX + "px";
+
+      laserMode = true;
+      updateLaserStatus();
+      label.textContent = "RACCOON BOSS! Auto laser eyes activated!";
+
+      bossMoveInterval = setInterval(() => {
+        if (!gameRunning || !bossFight) return;
+        bossX += 8 * bossDirection;
+        if (bossX <= 0 || bossX >= gameWidth - bossWidth) {
+          bossDirection *= -1;
+        }
+        boss.style.left = bossX + "px";
+      }, 80);
+
+      bossBombSpawner = setInterval(() => {
+        createBossBomb();
+      }, 700);
+
+      autoLaserInterval = setInterval(() => {
+        shootLaser(true);
+      }, 350);
+    }
+
+    function createBossBomb() {
+      if (!gameRunning || !bossFight) return;
+
+      const bomb = document.createElement("div");
+      bomb.className = "bossBomb";
+      bomb.style.left = (bossX + bossWidth / 2 - 20) + "px";
+      bomb.style.top = "64px";
+
+      const pixels = [
+        [8, 8], [16, 8], [24, 8],
+        [0, 16], [8, 16], [16, 16], [24, 16], [32, 16],
+        [0, 24], [8, 24], [16, 24], [24, 24], [32, 24],
+        [8, 32], [16, 32], [24, 32]
+      ];
+
+      pixels.forEach(([x, y]) => makePixel(bomb, x, y, "#ffea00"));
+      makePixel(bomb, 16, 16, "#ff3d00");
+      makePixel(bomb, 24, 16, "#ffffff");
+      makePixel(bomb, 16, 0, "#ff9100");
+
+      game.appendChild(bomb);
+
+      let y = 64;
+      const x = parseInt(bomb.style.left);
+
+      const fall = setInterval(() => {
+        if (!gameRunning || !bossFight) {
+          clearInterval(fall);
+          bomb.remove();
+          return;
+        }
+
+        y += 12;
+        bomb.style.top = y + "px";
+
+        if (isTouching(x, y, 40)) {
+          clearInterval(fall);
+          bomb.remove();
+          lives = 0;
+          livesDisplay.textContent = lives;
+          endGame("The raccoon boss bomb was a one-hit blast!", "Game Over");
+          return;
+        }
+
+        if (y > gameHeight) {
+          clearInterval(fall);
+          bomb.remove();
+        }
+      }, 20);
+    }
+
+    shootBtn.addEventListener("click", () => shootLaser());
+
+    function startLevel(level) {
+      stopSpawners();
       clearFallingItems();
-      updateBunny();
-      drawBunny();
+      clearTimeout(laserTimeout);
+      boss.style.display = "none";
+      bossFight = false;
 
-      diamondSpawner = setInterval(createDiamond, 900);
-      bombSpawner = setInterval(createBomb, 1200);
+      currentLevel = level;
+      changingLevel = false;
+      laserMode = false;
+      updateLaserStatus();
+      updateLevelLook();
+
+      if (currentLevel === 1) {
+        timeLeft = 30;
+        label.textContent = "Catch diamonds before time runs out! 💎";
+        document.querySelector("h1").textContent = "the blue screen of death";
+        diamondSpawner = setInterval(createDiamond, 900);
+        bombSpawner = setInterval(createBomb, 1200);
+        powerupSpawner = setInterval(createLaserPowerup, 9000);
+      } else if (currentLevel === 2) {
+        timeLeft = 25;
+        label.textContent = "The Red Ring of Death is active! Survive! 🔴";
+        document.querySelector("h1").textContent = "the red ring of death";
+        diamondSpawner = setInterval(createDiamond, 700);
+        bombSpawner = setInterval(createBomb, 850);
+        powerupSpawner = setInterval(createLaserPowerup, 8000);
+      } else {
+        timeLeft = 20;
+        label.textContent = "Levil Devil has arrived! Stay alive! 😈";
+        document.querySelector("h1").textContent = "levil devil";
+        startBossFight();
+      }
+
+      timerDisplay.textContent = timeLeft;
+      levelDisplay.textContent = currentLevel;
 
       countdown = setInterval(() => {
-        if (!gameRunning) return;
+        if (!gameRunning || changingLevel) return;
 
         timeLeft -= 1;
         timerDisplay.textContent = timeLeft;
 
         if (timeLeft <= 0) {
           timerDisplay.textContent = 0;
-          endGame("Time's up!");
+
+          if (currentLevel === 1) {
+            goToLevel2();
+          } else if (currentLevel === 2) {
+            goToLevel3();
+          } else {
+            winGame();
+          }
         }
       }, 1000);
     }
 
+    function goToLevel2() {
+      changingLevel = true;
+      stopSpawners();
+      clearFallingItems();
+      clearTimeout(laserTimeout);
+      laserMode = false;
+      updateLaserStatus();
+
+      label.textContent = "Level 2 unlocked: The Red Ring of Death!";
+      setTimeout(() => {
+        if (!gameRunning) return;
+        startLevel(2);
+      }, 1800);
+    }
+
+    function goToLevel3() {
+      changingLevel = true;
+      stopSpawners();
+      clearFallingItems();
+      clearTimeout(laserTimeout);
+      laserMode = false;
+      updateLaserStatus();
+
+      label.textContent = "Final Level unlocked: Levil Devil!";
+      setTimeout(() => {
+        if (!gameRunning) return;
+        startLevel(3);
+      }, 1800);
+    }
+
+    function winGame() {
+      endGame("You beat Levil Devil and the raccoon boss! CHAMPION!", "🏆 YOU ARE THE CHAMPION! 🏆");
+    }
+
+    function startGame() {
+      stopSpawners();
+      clearFallingItems();
+      clearTimeout(laserTimeout);
+
+      score = 0;
+      lives = 3;
+      gameRunning = true;
+      changingLevel = false;
+      laserMode = false;
+      bossFight = false;
+      bunnyX = 152;
+
+      scoreDisplay.textContent = score;
+      livesDisplay.textContent = lives;
+      overlay.style.display = "none";
+      boss.style.display = "none";
+      updateBunny();
+      drawBunny();
+      startLevel(1);
+    }
+
     restartBtn.addEventListener("click", () => {
-      clearInterval(diamondSpawner);
-      clearInterval(bombSpawner);
-      clearInterval(countdown);
       startGame();
     });
 
